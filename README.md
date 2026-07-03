@@ -156,3 +156,118 @@ status_line = [
   "weekly-limit",
 ]
 ```
+
+## `cursor agent`
+
+Two things, one, add an executable `~/.cursor/statusline.sh` script:
+
+```
+#!/usr/bin/env bash
+# Cursor CLI status line. The CLI pipes session JSON to stdin; stdout is shown
+# above the prompt. Docs: ~/.cursor/skills-cursor/statusline/SKILL.md
+#
+# Shows: model | effort | context % | dir | git branch + HEAD sha (+ * if dirty)
+#
+# Requires: bash, jq.
+#
+# Test (do not run bare — it reads stdin):
+#   echo '{"model":{"display_name":"Composer 2.5"},"context_window":{"used_percentage":34},"workspace":{"current_dir":"'"$PWD"'"}}' | ~/.cursor/statusline.sh
+
+LC_ALL=C
+
+render() {
+  local input="$1"
+
+  local fields
+  fields=$(jq -r '[
+    (.model.display_name // "?"),
+    ((.model.param_summary // "") | gsub("^\\(|\\)$"; "")),
+    (.context_window.used_percentage // 0),
+    (.workspace.current_dir // .cwd // "")
+  ] | map(tostring) | join("\u001f")' <<< "$input" 2>/dev/null)
+
+  if [[ -z $fields ]]; then
+    printf 'Cursor\n'
+    return 0
+  fi
+
+  local model effort ctx_pct cwd
+  IFS=$'\x1f' read -r model effort ctx_pct cwd <<< "$fields"
+
+  local RESET=$'\e[0m' DIM=$'\e[2m' CYAN=$'\e[36m' BLUE=$'\e[34m'
+  local GREEN=$'\e[32m' YELLOW=$'\e[33m' RED=$'\e[31m' MAGENTA=$'\e[35m'
+
+  int_part() {
+    local n=${1%%.*}
+    [[ $n =~ ^-?[0-9]+$ ]] && printf '%s' "$n" || printf '0'
+  }
+
+  pct_color() {
+    local p; p=$(int_part "$1")
+    if (( p >= 80 )); then printf '%s' "$RED"
+    elif (( p >= 50 )); then printf '%s' "$YELLOW"
+    else printf '%s' "$GREEN"; fi
+  }
+
+  local segs=() seg ctx_int bar out
+
+  seg="${CYAN}${model}${RESET}"
+  [[ -n $effort ]] && seg+=" ${MAGENTA}${effort}${RESET}"
+  segs+=("$seg")
+
+  ctx_int=$(int_part "$ctx_pct")
+  bar=""
+  for ((i = 0; i < 10; i++)); do
+    (( i < ctx_int / 10 )) && bar+="▓" || bar+="░"
+  done
+  segs+=("$(pct_color "$ctx_int")${bar} ${ctx_int}%${RESET} ${DIM}ctx${RESET}")
+
+  if [[ -n $cwd ]]; then
+    segs+=("${DIM}${cwd/#$HOME/~}${RESET}")
+  fi
+
+  if [[ -n $cwd ]] && git -C "$cwd" rev-parse --is-inside-work-tree &>/dev/null; then
+    local branch sha dirty
+    branch=$(git -C "$cwd" branch --show-current 2>/dev/null)
+    sha=$(git -C "$cwd" rev-parse --short=7 HEAD 2>/dev/null)
+    dirty=""
+    git -C "$cwd" diff --no-ext-diff --quiet 2>/dev/null &&
+      git -C "$cwd" diff --no-ext-diff --cached --quiet 2>/dev/null || dirty="*"
+    seg="${BLUE}⎇ ${branch:-detached}"
+    [[ -n $sha ]] && seg+=" ${sha}"
+    seg+="${dirty}${RESET}"
+    segs+=("$seg")
+  fi
+
+  out=""
+  for s in "${segs[@]}"; do
+    [[ -n $out ]] && out+=" ${DIM}│${RESET} "
+    out+="$s"
+  done
+  printf '%s\n' "$out"
+}
+
+if [[ -t 0 ]]; then
+  # No stdin pipe — Cursor always feeds JSON. Show a sample instead of blocking on cat.
+  printf 'statusline.sh reads JSON from stdin (used by Cursor CLI, not run interactively).\n' >&2
+  printf 'Sample with current directory:\n' >&2
+  render "$(jq -nc \
+    --arg dir "$PWD" \
+    --arg name "Composer 2.5" \
+    '{model:{display_name:$name,param_summary:"(High)"},context_window:{used_percentage:34},workspace:{current_dir:$dir}}')"
+  exit 0
+fi
+
+input=$(cat)
+render "$input"
+```
+
+And two, in `~/.cursor/cli-config.json`:
+
+```
+"statusLine": {
+  "type": "command",
+  "command": "~/.cursor/statusline.sh",
+  "padding": 2
+},
+```
