@@ -139,3 +139,20 @@ And two, add this into `~/.claude/settings.json`:
     "refreshInterval": 1
   },
 ```
+
+## `codex`
+
+In `~/.codex/config.toml`, add:
+
+```
+[tui]
+status_line = [
+  "model",
+  "reasoning",
+  "context-used",
+  "current-dir",
+  "git-branch",
+  "five-hour-limit",
+  "weekly-limit",
+]
+```
