@@ -157,6 +157,15 @@ status_line = [
 ]
 ```
 
+I also recommend this:
+
+```
+[features]
+apps = false
+```
+
+Saves a couple seconds on startup and sometimes per prompt.
+
 ## `cursor agent`
 
 Two things, one, add an executable `~/.cursor/statusline.sh` script:
